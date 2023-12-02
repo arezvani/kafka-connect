@@ -132,6 +132,111 @@ You can also use [Kafka Connect Transformations](https://docs.confluent.io/platf
 > --property print.key=true --property key.separator=":"
 > ```
 
+## S3 Sink
+
+- **FieldPartitioner:**
+  ```
+  curl -X POST   -H "Content-Type: application/json"   --data '{
+   "name": "s3-sink",
+    "config": {
+      "connector.class": "io.confluent.connect.s3.S3SinkConnector",
+      "tasks.max": "6",
+      "rotate.schedule.interval.ms": 3600000,
+      "topics": "test",
+      "s3.bucket.name": "test",
+      "s3.region": "us-east-1",
+      "flush.size": "50",
+      "timezone" : "UTC", 
+      "storage.class": "io.confluent.connect.s3.storage.S3Storage",
+      "format.class": "io.confluent.connect.s3.format.json.JsonFormat",
+      "partitioner.class": "io.confluent.connect.storage.partitioner.FieldPartitioner",
+      "partition.field.name": "MSISDN",
+      "key.converter": "org.apache.kafka.connect.storage.StringConverter",
+      "value.converter": "org.apache.kafka.connect.json.JsonConverter",	
+      "key.converter.schemas.enable": "false",
+      "value.converter.schemas.enable": "true",	
+      "aws.access.key.id": "*******************",
+      "aws.secret.access.key": "***************",
+      "store.url": "#################",
+      "name": "s3-sink"
+    }}' http://localhost:8083/connectors
+  ```
+  
+  **Maximum number of records:** The connector’s `flush.size` configuration property specifies the maximum number of records that should be written to a single S3 object. There is no default for this setting.
+  
+  **Maximum span of record time:** The connector’s `rotate.interval.ms` specifies the maximum timespan in milliseconds a file can remain open and ready for additional records. The timestamp for each file starts with the record timestamp of the first record written to the file, as determined by the partitioner’s timestamp.extractor. As long as the next record’s timestamp fits within the timespan specified by the rotate.interval.ms, the record will be written to the file. If a record’s timestamp does not fit within the timespan of the file, the connector will flush the file, uploaded it to S3, commit the offsets of the records in that file, and then create a new file with a timespan that starts with the first record and writes the first record to the file.
+  
+  **Scheduled rotation:** The connector’s `rotate.schedule.interval.ms` specifies the maximum timespan in milliseconds a file can remain open and ready for additional records. Unlike with rotate.interval.ms, with scheduled rotation the timestamp for each file starts with the system time that the first record is written to the file. As long as a record is processed within the timespan specified by rotate.schedule.interval.ms, the record will be written to the file. As soon as a record is processed after the timespan for the current file, the file is flushed, uploaded to S3, and the offset of the records in the file are committed. A new file is created with a timespan that starts with the current system time, and the record is written to the file. The commit will be performed at the scheduled time, regardless of the previous commit time or number of messages. This configuration is useful when you have to commit your data based on current server time, for example at the beginning of every hour. The default value -1 means that this feature is disabled.
+
+  > **Important:**
+  > 
+  > Be sure to set the timezone configuration property before setting rotate.schedule.interval.ms, otherwise the connector will throw an exception.
+
+  ![image](https://github.com/arezvani/kafka-connect/assets/20871524/188f9eeb-b190-4cc6-909b-e4266267a711)
+
+  ```json
+  # test+0+0000000006.json
+  
+  {"MSISDN":"100095650650","CALL_PARTNER":"100096709436","DURATION":"4424","IMSI":"123456792"}
+  {"MSISDN":"100095650650","CALL_PARTNER":"100096709436","DURATION":"34714","IMSI":"113456792"}
+  {"MSISDN":"100095650650","CALL_PARTNER":"100096709436","DURATION":"44714","IMSI":"123456792"}
+  {"MSISDN":"100095650650","CALL_PARTNER":"100396709436","DURATION":"41614","IMSI":"120456792"}
+  ```
+
+- **TimeBasedPartitioner:**
+  To guarantee exactly-once semantics with the `TimeBasedPartitioner`, the connector must be configured to use a deterministic implementation of TimestampExtractor and a deterministic rotation strategy. The deterministic timestamp extractors are Kafka records (timestamp.extractor=Record) or record fields (timestamp.extractor=RecordField). The deterministic rotation strategy configuration is rotate.interval.ms (setting rotate.schedule.interval.ms is nondeterministic and will invalidate exactly-once guarantees).
+
+- **[FieldAndTimeBasedPartitioner](https://github.com/canelmas/kafka-connect-field-and-time-partitioner):**
+  ```
+   curl -X POST   -H "Content-Type: application/json"   --data '{
+   "name": "s3-sink",
+    "config": {
+      "connector.class": "io.confluent.connect.s3.S3SinkConnector",
+      "tasks.max": "1",
+      "topics": "test",
+      "s3.bucket.name": "test",
+      "s3.region": "us-east-1",
+      "flush.size": "50",
+      "storage.class": "io.confluent.connect.s3.storage.S3Storage",
+      "format.class": "io.confluent.connect.s3.format.parquet.ParquetFormat",
+      "partitioner.class": "com.canelmas.kafka.connect.FieldAndTimeBasedPartitioner",
+      "partition.duration.ms" : 300000,
+      "path.format": "'\'year\''=YYYY/'\'month\''=MM/'\'day\''=dd",
+      "locale" : "US",
+      "timezone" : "UTC",        
+      "partition.field.name": "MSISDN",
+      "key.converter": "org.apache.kafka.connect.storage.StringConverter",
+      "value.converter": "org.apache.kafka.connect.json.JsonConverter",	
+      "key.converter.schemas.enable": "false",
+      "value.converter.schemas.enable": "true",	
+      "aws.access.key.id": "*******************",
+      "aws.secret.access.key": "*******************",
+      "store.url": "##############",
+      "name": "s3-sink"
+    }}' http://localhost:8083/connectors
+  ```
+
+- **[AivenKafkaConnectS3SinkConnector](https://github.com/Aiven-Open/s3-connector-for-apache-kafka) (Partition with key):**
+  ```
+   curl -X POST   -H "Content-Type: application/json"   --data '{
+   "name": "s3-sink",
+    "config": {
+      "connector.class": "io.aiven.kafka.connect.s3.AivenKafkaConnectS3SinkConnector",
+      "topics": "test",
+      "aws.s3.bucket.name": "backup-redis",
+      "aws.s3.region": "us-east-1",
+      "format.output.type": "jsonl",
+      "file.name.template": "k{{key}}",
+      "format.output.fields": "key,value,offset,timestamp",
+      "file.compression.type": "gzip",
+      "format.output.envelope": "true",
+      "aws.access.key.id": "CEGLR7TCEN471OHFPKOE",
+      "aws.secret.access.key": "qaSvzHlkkdzEiFRKeYu1NehTnzP1PY5FYxDOmq6e",
+      "aws.s3.endpoint": "http://192.168.96.108:10049",
+      "key.converter": "org.apache.kafka.connect.storage.StringConverter",
+      "name": "s3-sink"
+    }}' http://localhost:8083/connectors
+  ```
 
 ## Command and Rest API
 
